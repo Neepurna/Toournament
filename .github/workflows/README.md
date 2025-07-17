@@ -46,16 +46,67 @@ This directory contains GitHub Actions workflows for automating CI/CD processes 
 ## Configuration
 
 ### Azure Authentication
-To enable authentication with Azure, you need to set up the following secrets in your GitHub repository:
+To enable authentication with Azure, you have two options:
 
-1. Create an Azure Service Principal:
+#### Option 1: Federated Credentials (Recommended - More Secure)
+
+This approach uses OpenID Connect (OIDC) to establish trust between GitHub and Azure without storing secrets:
+
+1. **Register an application in Azure AD**:
 ```bash
-az ad sp create-for-rbac --name "GitHubActionSP" --role contributor \
-                         --scopes /subscriptions/{subscription-id}/resourceGroups/{resource-group} \
-                         --sdk-auth
+# Get subscription ID
+az account show --query id -o tsv
+
+# Create an app registration
+az ad app create --display-name "GitHub-Toournament-Actions"
 ```
 
-2. Add the following secrets to your GitHub repository:
+2. **Get the Application (Client) ID**:
+```bash
+# Note the appId from the output
+APP_ID=$(az ad app list --display-name "GitHub-Toournament-Actions" --query "[].appId" -o tsv)
+echo $APP_ID
+```
+
+3. **Create service principal for the app**:
+```bash
+az ad sp create --id $APP_ID
+```
+
+4. **Assign contributor role**:
+```bash
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+az role assignment create --role contributor --assignee $APP_ID --scope /subscriptions/$SUBSCRIPTION_ID
+```
+
+5. **Configure federated credentials in Azure portal**:
+   - Go to Azure portal → Azure Active Directory → App registrations
+   - Select your new app "GitHub-Toournament-Actions"
+   - Go to "Certificates & secrets" → "Federated credentials"
+   - Add credential: 
+     - Scenario: GitHub Actions deploying Azure resources
+     - Organization: your-github-org
+     - Repository: Toournament
+     - Entity type: Branch
+     - Branch: main
+     - Name: github-federated-identity
+
+6. **Add the following secrets to your GitHub repository**:
+   - `AZURE_CLIENT_ID`: The application (client) ID
+   - `AZURE_TENANT_ID`: Your Azure tenant ID
+   - `AZURE_SUBSCRIPTION_ID`: Your Azure subscription ID
+
+#### Option 2: Service Principal with Secret
+
+If you have proper permissions, you can create a service principal with a client secret:
+
+1. **Ask your Azure administrator** to create a service principal and provide you with the credentials:
+```bash
+az ad sp create-for-rbac --name "GitHubActionSP" --role contributor \
+                         --scopes /subscriptions/{subscription-id}/resourceGroups/{resource-group}
+```
+
+2. **Add the following secrets to your GitHub repository**:
    - `AZURE_CLIENT_ID`: The service principal client ID
    - `AZURE_TENANT_ID`: The tenant ID
    - `AZURE_SUBSCRIPTION_ID`: Your Azure subscription ID
