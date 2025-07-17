@@ -27,8 +27,7 @@ const UltimateQuiz: React.FC = () => {
     if (modeId === 'practice-mode') {
       navigate('/practice-quiz')
     } else if (modeId === 'quiz-royale') {
-      // Navigate to Quiz Royale mode
-      alert('Quiz Royale mode will be implemented next')
+      navigate('/quiz-royale')
     } else {
       console.log(`${modeId} mode will be implemented next`)
     }

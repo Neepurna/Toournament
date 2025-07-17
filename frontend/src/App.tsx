@@ -7,6 +7,7 @@ import HomePage from './HomePage'
 import SelectGames from './SelectGames'
 import UltimateQuiz from './UltimateQuiz'
 import PracticeQuiz from './PracticeQuiz'
+import QuizRoyale from './QuizRoyale'
 
 // Dark theme configuration for Material UI
 const darkTheme = createTheme({
@@ -133,6 +134,7 @@ function App() {
             <Route path="/games" element={<SelectGames />} />
             <Route path="/ultimate-quiz" element={<UltimateQuiz />} />
             <Route path="/practice-quiz" element={<PracticeQuiz />} />
+            <Route path="/quiz-royale" element={<QuizRoyale />} />
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
         )}

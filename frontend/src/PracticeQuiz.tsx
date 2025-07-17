@@ -125,6 +125,19 @@ const PracticeQuiz: React.FC = () => {
     }
   }, [gameState.gameOver]);
 
+  // Auto-start the game when component mounts
+  useEffect(() => {
+    const firstQuestion = getNextQuestion();
+    if (firstQuestion) {
+      setGameState(prev => ({
+        ...prev,
+        isGameActive: true,
+        currentQuestion: firstQuestion,
+        difficulty: getCurrentDifficulty(0)
+      }));
+    }
+  }, []);
+
   const startGame = () => {
     const firstQuestion = getNextQuestion();
     if (firstQuestion) {
