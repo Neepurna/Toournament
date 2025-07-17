@@ -1,45 +1,138 @@
-name: Kubernetes Deploy
+name: Kubernetes Deployment
 
 on:
-  workflow_dispatch:
   push:
     branches: [ main ]
-    paths:
-      - 'k8s/**'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
 
 env:
-  AZURE_RESOURCE_GROUP: quiz-royale-rg
-  AZURE_AKS_CLUSTER: quiz-royale-aks
-  ACR_NAME: quizroyaleacr
+  REGISTRY: ghcr.io
+  FRONTEND_IMAGE_NAME: ${{ github.repository }}-frontend
+  BACKEND_IMAGE_NAME: ${{ github.repository }}-backend
 
 jobs:
-  deploy-to-aks:
+  build-and-push:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata (tags, labels) for Backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: backend.Dockerfile # Assuming you have a separate Dockerfile for backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
     
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Azure Login with OIDC
-      uses: azure/login@v1
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        enable-AzPSSession: true
-    
-    - name: Get AKS credentials
-      run: |
-        az aks get-credentials --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_AKS_CLUSTER }}
-    
-    - name: Deploy to AKS
-      run: |
-        ACR_LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query loginServer --output tsv)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
         
-        sed -i "s|IMAGE_PLACEHOLDER|$ACR_LOGIN_SERVER/quiz-royale-frontend:latest|g" k8s/frontend-deployment.yaml
-        
-        kubectl apply -f k8s/
-        
-        kubectl rollout status deployment/quiz-royale-frontend -n quiz-royale
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Update Kubernetes secrets
+        run: |
+          # Update database URL with environment variables
+          export DB_URL="${{ secrets.DATABASE_URL }}"
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          export REDIS_URL="${{ secrets.REDIS_URL }}"
+          export REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}"
+          
+          cat k8s/secrets.yaml | \
+          sed "s|DATABASE_URL: .*|DATABASE_URL: \"$DB_URL\"|g" | \
+          sed "s|JWT_SECRET: .*|JWT_SECRET: \"$JWT_SECRET\"|g" | \
+          sed "s|REDIS_URL: .*|REDIS_URL: \"$REDIS_URL\"|g" | \
+          sed "s|REDIS_PASSWORD: .*|REDIS_PASSWORD: \"$REDIS_PASSWORD\"|g" > updated-secrets.yaml
+          
+          kubectl apply -f updated-secrets.yaml
+          rm updated-secrets.yaml # Cleanup
+          
+      - name: Create namespaces
+        run: kubectl apply -f k8s/namespace.yaml
+
+      - name: Deploy Redis
+        run: kubectl apply -f k8s/redis-deployment.yaml
+
+      - name: Update Backend deployment image
+        run: |
+          cat k8s/backend-deployment.yaml | \
+          sed "s|image: us-central1-docker.pkg.dev/PROJECT_ID/quiz-royale/quiz-royale-backend:.*|image: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}|g" > updated-backend.yaml
+          kubectl apply -f updated-backend.yaml
+          rm updated-backend.yaml # Cleanup
+
+      - name: Update Frontend deployment image
+        run: |
+          cat k8s/frontend-deployment.yaml | \
+          sed "s|image: neepurna/frontend-quiz:.*|image: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}|g" > updated-frontend.yaml
+          kubectl apply -f updated-frontend.yaml
+          rm updated-frontend.yaml # Cleanup
+          
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/quiz-royale-backend -n quiz-royale
+          kubectl rollout status deployment/quiz-royale-frontend -n quiz-royale
