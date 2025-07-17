@@ -31,7 +31,35 @@ This directory contains GitHub Actions workflows for automating CI/CD processes 
 - Runs ESLint on JavaScript/TypeScript files
 - Runs Solhint on Solidity files
 
+### Azure Deploy (`azure-deploy.yml`)
+- Deploys the application to Azure
+- Runs tests and builds the frontend
+
+### Terraform Deploy (`terraform-deploy.yml`) 
+- Deploys infrastructure using Terraform
+- Requires Azure credentials
+
+### Kubernetes Deploy (`kubernetes-deploy.yml`)
+- Deploys the application to a Kubernetes cluster
+- Requires Azure credentials
+
 ## Configuration
+
+### Azure Authentication
+To enable authentication with Azure, you need to set up the following secrets in your GitHub repository:
+
+1. Create an Azure Service Principal:
+```bash
+az ad sp create-for-rbac --name "GitHubActionSP" --role contributor \
+                         --scopes /subscriptions/{subscription-id}/resourceGroups/{resource-group} \
+                         --sdk-auth
+```
+
+2. Add the following secrets to your GitHub repository:
+   - `AZURE_CLIENT_ID`: The service principal client ID
+   - `AZURE_TENANT_ID`: The tenant ID
+   - `AZURE_SUBSCRIPTION_ID`: Your Azure subscription ID
+   - `AZURE_CLIENT_SECRET`: The service principal client secret
 
 ### Docker Registry
 To enable pushing Docker images to a registry:
@@ -39,6 +67,8 @@ To enable pushing Docker images to a registry:
 1. Add the following secrets to your GitHub repository:
    - `DOCKERHUB_USERNAME`: Your Docker Hub username
    - `DOCKERHUB_TOKEN`: Your Docker Hub access token
+   - `DOCKER_USERNAME`: (Same as DOCKERHUB_USERNAME for backward compatibility)
+   - `DOCKER_PASSWORD`: (Same as DOCKERHUB_TOKEN for backward compatibility)
 
 2. Update the `frontend-ci-cd.yml` file to uncomment the Docker login step and update the image tags as needed.
 
