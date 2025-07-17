@@ -1,0 +1,39 @@
+name: Kubernetes Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'k8s/**'
+
+env:
+  AZURE_RESOURCE_GROUP: quiz-royale-rg
+  AZURE_AKS_CLUSTER: quiz-royale-aks
+  ACR_NAME: quizroyaleacr
+
+jobs:
+  deploy-to-aks:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_AKS_CLUSTER }}
+    
+    - name: Deploy to AKS
+      run: |
+        ACR_LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query loginServer --output tsv)
+        
+        sed -i "s|IMAGE_PLACEHOLDER|$ACR_LOGIN_SERVER/quiz-royale-frontend:latest|g" k8s/frontend-deployment.yaml
+        
+        kubectl apply -f k8s/
+        
+        kubectl rollout status deployment/quiz-royale-frontend -n quiz-royale

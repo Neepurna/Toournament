@@ -1,0 +1,47 @@
+name: Smart Contracts Security Scan
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'contracts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'contracts/**'
+  schedule:
+    - cron: '0 0 * * 1' # Run every Monday at midnight UTC
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Install Slither
+        run: |
+          pip3 install slither-analyzer
+      
+      - name: Compile contracts
+        run: npx hardhat compile
+      
+      - name: Run Slither
+        continue-on-error: true
+        run: |
+          slither . --json slither-report.json
+      
+      - name: Upload Security Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: slither-report.json
+          retention-days: 14
