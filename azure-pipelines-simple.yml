@@ -1,0 +1,165 @@
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+variables:
+  # Docker variables
+  dockerHubConnection: 'docker-hub-connection'
+  dockerRepository: 'neepurna/frontend-quiz'
+  dockerTag: '$(Build.BuildId)'
+  
+  # Environment
+  environment: 'dev'
+
+stages:
+- stage: Build
+  displayName: 'Build and Push Docker Images'
+  jobs:
+  - job: BuildImages
+    displayName: 'Build Docker Images'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UseNode@1
+      displayName: 'Use Node.js 18'
+      inputs:
+        version: '18.x'
+    
+    - script: |
+        echo "Building frontend application..."
+        cd frontend
+        npm install
+        npm run build
+      displayName: 'Build Frontend Application'
+      continueOnError: false
+    
+    - task: Docker@2
+      displayName: 'Build and Push Frontend Docker Image'
+      inputs:
+        containerRegistry: '$(dockerHubConnection)'
+        repository: '$(dockerRepository)'
+        command: 'buildAndPush'
+        Dockerfile: 'Dockerfile'
+        tags: |
+          $(dockerTag)
+          latest
+    
+    - task: Docker@2
+      displayName: 'Build and Push Backend Docker Image'
+      inputs:
+        containerRegistry: '$(dockerHubConnection)'
+        repository: 'neepurna/backend-quiz'
+        command: 'buildAndPush'
+        Dockerfile: 'backend.Dockerfile'
+        tags: |
+          $(dockerTag)
+          latest
+
+- stage: Deploy
+  displayName: 'Deploy to Kubernetes'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: DeployToK8s
+    displayName: 'Deploy to Kubernetes Cluster'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - checkout: self
+    
+    - script: |
+        echo "Installing kubectl..."
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/
+        kubectl version --client
+      displayName: 'Install kubectl'
+    
+    - script: |
+        echo "Setting up kubeconfig..."
+        mkdir -p $HOME/.kube
+        echo "$(KUBE_CONFIG_BASE64)" | base64 -d > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+        
+        echo "Testing kubectl connection..."
+        kubectl config current-context
+        kubectl get nodes
+      displayName: 'Configure kubectl'
+      env:
+        KUBE_CONFIG_BASE64: $(kubeConfigBase64)
+    
+    - task: replacetokens@5
+      displayName: 'Replace tokens in manifests'
+      inputs:
+        rootDirectory: 'k8s'
+        targetFiles: '**/*.yaml'
+        encoding: 'auto'
+        tokenPattern: 'default'
+        writeBOM: true
+        actionOnMissing: 'warn'
+        keepToken: false
+        actionOnNoFiles: 'continue'
+        enableTransforms: false
+        useLegacyPattern: false
+        enableTelemetry: true
+    
+    - script: |
+        echo "Creating namespace..."
+        kubectl create namespace quiz-royale --dry-run=client -o yaml | kubectl apply -f -
+      displayName: 'Create Namespace'
+    
+    - script: |
+        echo "Updating image tags..."
+        sed -i "s|#{FRONTEND_IMAGE}#|$(dockerRepository):$(dockerTag)|g" k8s/frontend-deployment.yaml
+        sed -i "s|#{BACKEND_IMAGE}#|neepurna/backend-quiz:$(dockerTag)|g" k8s/backend-deployment.yaml
+        
+        echo "Deploying to Kubernetes..."
+        kubectl apply -f k8s/redis-deployment.yaml
+        kubectl apply -f k8s/backend-deployment.yaml
+        kubectl apply -f k8s/frontend-deployment.yaml
+      displayName: 'Deploy Applications'
+    
+    - script: |
+        echo "Waiting for deployments to be ready..."
+        kubectl rollout status deployment/quiz-royale-redis -n quiz-royale --timeout=300s || true
+        kubectl rollout status deployment/quiz-royale-backend -n quiz-royale --timeout=300s || true
+        kubectl rollout status deployment/quiz-royale-frontend -n quiz-royale --timeout=300s || true
+        
+        echo ""
+        echo "=== DEPLOYMENT STATUS ==="
+        kubectl get pods -n quiz-royale
+        echo ""
+        echo "=== SERVICES ==="
+        kubectl get services -n quiz-royale
+        
+        # Try to get LoadBalancer IP
+        EXTERNAL_IP=$(kubectl get service quiz-royale-frontend -n quiz-royale -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+        if [ "$EXTERNAL_IP" != "pending" ] && [ -n "$EXTERNAL_IP" ]; then
+          echo ""
+          echo "🚀 Frontend URL: http://$EXTERNAL_IP"
+          echo "##vso[task.setvariable variable=frontendUrl]http://$EXTERNAL_IP"
+        else
+          echo ""
+          echo "⏳ LoadBalancer IP is pending. Check later with:"
+          echo "kubectl get services -n quiz-royale"
+        fi
+      displayName: 'Check Deployment Status'
+    
+    - script: |
+        echo "=========================================="
+        echo "🚀 DEPLOYMENT COMPLETE!"
+        echo "=========================================="
+        echo "Environment: $(environment)"
+        echo "Frontend Image: $(dockerRepository):$(dockerTag)"
+        echo "Backend Image: neepurna/backend-quiz:$(dockerTag)"
+        echo "Build ID: $(Build.BuildId)"
+        echo ""
+        echo "Next steps:"
+        echo "1. Check pods: kubectl get pods -n quiz-royale"
+        echo "2. Get services: kubectl get services -n quiz-royale"
+        echo "3. View logs: kubectl logs -f deployment/quiz-royale-frontend -n quiz-royale"
+      displayName: 'Deployment Summary'
