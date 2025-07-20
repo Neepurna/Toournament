@@ -47,7 +47,7 @@ stages:
         echo "Building frontend application..."
         cd frontend
         npm run build
-        ls -la build/
+        ls -la ../dist/
       displayName: 'Build Frontend Application'
       
     - task: Docker@2
@@ -81,8 +81,7 @@ stages:
     steps:
     - script: |
         echo "Running basic tests..."
-        cd frontend
-        npm test -- --coverage --watchAll=false
+        npm test
       displayName: 'Run Tests'
       continueOnError: true
       

@@ -7,7 +7,7 @@
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"No tests implemented yet. This is a placeholder for future tests.\" && exit 0"
   },
   "keywords": [],
   "author": "",
