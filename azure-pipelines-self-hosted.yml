@@ -1,3 +1,6 @@
+# Azure DevOps Self-Hosted Agent Pipeline
+# This pipeline uses a self-hosted agent instead of Microsoft-hosted agents
+
 trigger:
   branches:
     include:
@@ -6,7 +9,7 @@ trigger:
   paths:
     include:
     - frontend/*
-    - azure-pipelines-basic.yml
+    - azure-pipelines-self-hosted.yml
 
 variables:
   # Docker variables
@@ -16,14 +19,17 @@ variables:
   # Environment
   environment: 'dev'
 
+pool:
+  name: 'Default'  # Uses self-hosted agent pool
+  # Remove the vmImage line to use self-hosted agents
+
 stages:
 - stage: Build
   displayName: 'Build Frontend Application'
   jobs:
   - job: BuildFrontend
     displayName: 'Build Frontend'
-    pool:
-      name: 'Default'  # Use self-hosted agent pool instead of Microsoft-hosted
+    # No pool specified here means it will use the default self-hosted pool
     
     steps:
     - task: UseNode@1
@@ -71,23 +77,20 @@ stages:
   jobs:
   - job: TestFrontend
     displayName: 'Test Frontend Build'
-    pool:
-      name: 'Default'  # Use self-hosted agent pool
     
     steps:
     - script: |
-        echo "=== BUILD VERIFICATION ==="
-        echo "✅ Frontend build completed successfully!"
-        echo "Build ID: $(Build.BuildId)"
-        echo "Build Number: $(Build.BuildNumber)"
-        echo "Repository: $(Build.Repository.Name)"
-        echo "Branch: $(Build.SourceBranchName)"
-        echo ""
-        echo "=== NEXT STEPS ==="
-        echo "1. ✅ Terraform cluster deployment - COMPLETED"
-        echo "2. ✅ Frontend application running in AKS - COMPLETED" 
-        echo "3. ✅ CI/CD pipeline running - IN PROGRESS"
-        echo ""
-        echo "Frontend is accessible via:"
-        echo "kubectl port-forward -n tournament-app service/tournament-frontend-service 8080:80"
-      displayName: 'Deployment Status Summary'
+        echo "Running basic tests..."
+        cd frontend
+        npm test -- --coverage --watchAll=false
+      displayName: 'Run Tests'
+      continueOnError: true
+      
+    - script: |
+        echo "=========================================="
+        echo "🧪 Test Summary"
+        echo "=========================================="
+        echo "Frontend tests completed"
+        echo "Docker image ready: $(frontendRepository):$(dockerTag)"
+        echo "=========================================="
+      displayName: 'Test Summary'
